@@ -10,10 +10,11 @@ id = str(uuid.uuid4())
 
 
 async def joro_main(websocket):
-    for i in range(5):
+    for i in range(3):
         await asyncio.sleep(1)
         # 1秒ごとにjキーが押されているか確認
         # jが押されていたら、isWateringをTrueにして送信
+        print("sent!")
         message = json.dumps(
             {
                 "head": {"type": "joro_status"},
