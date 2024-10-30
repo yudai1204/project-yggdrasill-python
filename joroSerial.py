@@ -4,6 +4,8 @@ import json
 import asyncio
 import serial
 import time
+import pygame
+import threading
 
 # WebSocketサーバーのURL
 SERVER_URL = "ws://localhost:3210"
@@ -17,9 +19,17 @@ id = str(uuid.uuid4())
 
 last_send_time = 0
 
+is_closing = False
+
+
+def play_sound():
+    pygame.mixer.music.load("watering.wav")
+    pygame.mixer.music.play()
+
 
 async def joro_main(websocket):
     global last_send_time
+    global is_closing
     watering_array = []
     ser = serial.Serial(port, baudrate)
     try:
@@ -27,21 +37,21 @@ async def joro_main(websocket):
             if ser.in_waiting > 0:
                 data = float(ser.readline().decode("utf-8").rstrip())
                 is_watering_now = data < -0.5
-                # print(is_watering_now)
                 if len(watering_array) > 5:
                     watering_array.pop(0)
                 watering_array.append(is_watering_now)
                 # 全てTrueなら水やり中
                 is_watering = all(watering_array)
-                print(is_watering)
+                print(data, is_watering)
 
                 if last_send_time + 2 > time.time():
                     continue
                 if is_watering == False:
                     continue
 
+                # 水やりしている時
+                threading.Thread(target=play_sound).start()  # 音声を別スレッドで再生
                 last_send_time = time.time()
-
                 message = json.dumps(
                     {
                         "head": {"type": "joro_status"},
@@ -51,33 +61,37 @@ async def joro_main(websocket):
                 await websocket.send(message)
     except KeyboardInterrupt:
         print("Program interrupted by user.")
+        is_closing = True
     finally:
         ser.close()
         print("Serial port closed.")
 
 
 async def main():
-    # while True:
-    try:
-        async with websockets.connect(SERVER_URL) as websocket:
-            # 接続後、特定のメッセージを送信
-            initial_message = json.dumps(
-                {
-                    "head": {"type": "init"},
-                    "body": {"type": "joro", "uuid": id, "isWatering": False},
-                }
-            )
-            await websocket.send(initial_message)
-            print(f"init done.")
+    pygame.mixer.init()
+    while True:
+        if is_closing:
+            break
+        try:
+            async with websockets.connect(SERVER_URL) as websocket:
+                # 接続後、特定のメッセージを送信
+                initial_message = json.dumps(
+                    {
+                        "head": {"type": "init"},
+                        "body": {"type": "joro", "uuid": id, "isWatering": False},
+                    }
+                )
+                await websocket.send(initial_message)
+                print(f"init done.")
 
-            await joro_main(websocket)
-    except (
-        websockets.exceptions.ConnectionClosedError,
-        websockets.exceptions.InvalidStatusCode,
-        OSError,
-    ) as e:
-        print(f"WebSocket接続が切断されました: {e}. 再接続を試みます...")
-        await asyncio.sleep(1)  # 1秒待機してから再接続を試みる
+                await joro_main(websocket)
+        except (
+            websockets.exceptions.ConnectionClosedError,
+            websockets.exceptions.InvalidStatusCode,
+            OSError,
+        ) as e:
+            print(f"WebSocket接続が切断されました: {e}. 再接続を試みます...")
+            await asyncio.sleep(1)  # 1秒待機してから再接続を試みる
 
 
 # 非同期タスクを実行
